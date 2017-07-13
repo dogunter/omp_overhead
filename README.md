@@ -24,7 +24,7 @@ Additionally, the code prints out information for each thread to show affinity i
 # Getting the code
 
 ```
- % git clone git@gitlab.lanl.gov:dog/omp_overhead.git
+ % git clone https://github.com/dogunter/omp_overhead
 ```
 
 This command will check out the source code, including necessary makefiles.
