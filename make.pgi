@@ -1,0 +1,22 @@
+.PHONY: all
+
+CC=mpicc
+CXX=mpiCC
+FC=mpif90
+
+CFLAGS = -mp -g -O0
+CXXFLAGS = -mp -g -O0
+FCFLAGS = -mp -g -O0
+
+#INCLUDES=-I/$(HWLOCROOT)/include
+#LIBDIR=-L/$(HWLOCROOT)/lib
+LIBS=-lhwloc
+
+all: omp_overhead
+
+omp_overhead: omp_overhead.o
+	$(CC) $(CFLAGS) -o $@ $@.o $(LIBDIR) $(LIBS)
+
+.c.o:
+	${CC} $(INCLUDES) ${CFLAGS} -c $*.c
+

@@ -1,0 +1,37 @@
+.PHONY: all
+
+# Are we on a Cray system?
+ifeq ($(PELANL_PRGENV),true)
+  CC=cc
+  CXX=CC
+  FC=ftn
+  CFLAGS = -dynamic -std=c99 -qopenmp -no-vec -g -O0
+  CXXFLAGS = -dynamic -std=c99 -qopenmp -no-vec -g -O0
+  FCFLAGS = -dynamic -qopenmp -no-vec -g -O0
+else
+  CC=mpicc
+  CXX=mpiCC
+  FC=mpif90
+  CFLAGS = -std=c99 -qopenmp -no-vec -g -O0
+  CXXFLAGS = -std=c99 -qopenmp -no-vec -g -O0
+  FCFLAGS = -qopenmp -no-vec -g -O0
+endif
+
+#CFLAGS = -std=c99 -qopenmp -no-vec -g -O0
+#CXXFLAGS = -std=c99 -qopenmp -no-vec -g -O0
+#FCFLAGS = -qopenmp -no-vec -g -O0
+
+#INCLUDES=-I$(HWLOCROOT)/include
+#LIBDIR=-L$(HWLOCROOT)/lib
+# Add -lopen-pal if using Open-MPI on some systems
+#LIBS=-lhwloc -lopen-pal
+LIBS=-lhwloc
+
+all: omp_overhead
+
+omp_overhead: omp_overhead.o
+	$(CC) $(INCLUDES) $(CFLAGS) -o $@ $@.o $(LIBDIR) $(LIBS)
+
+.c.o:
+	${CC} ${CFLAGS} -c $*.c
+
