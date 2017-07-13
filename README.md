@@ -35,6 +35,12 @@ The code requires an installed hwloc package.
 
 https://www.open-mpi.org/projects/hwloc/
 
+In addition, prior to running gmake/make you must set the environment variable HWLOC to point the installed hwloc base. I.e.
+
+% export HWLOCROOT=/usr
+
+on many systems with an included hwloc package.
+
 # Build Instructions
 
 Assuming the chosen compiler and MPI implementation are in your path, 
