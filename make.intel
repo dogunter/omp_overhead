@@ -1,7 +1,7 @@
 .PHONY: all
 
 # Are we on a Cray system?
-ifeq ($(PELANL_PRGENV),true)
+ifdef ($(CRAYPE_VERSION))
   CC=cc
   CXX=CC
   FC=ftn
@@ -25,7 +25,7 @@ endif
 #LIBDIR=-L$(HWLOCROOT)/lib
 # Add -lopen-pal if using Open-MPI on some systems
 #LIBS=-lhwloc -lopen-pal
-LIBS=-lhwloc
+LIBS=-lhwloc -lm
 
 all: omp_overhead
 

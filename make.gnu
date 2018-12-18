@@ -1,6 +1,6 @@
 .PHONY: all
 
-ifeq ($(PELANL_PRGENV),true)
+ifdef ($(CRAYPE_VERSION))
   CC = cc
   CXX = CC
   FC = ftn

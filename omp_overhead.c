@@ -1,12 +1,18 @@
 //
 // omp_overhead.c
 //
-// Measures OMP overhead and speedup.
+// Measures OMP overhead and speedup, also reports thread affinity status.
 // 1. Measure the time to execute a serial loop
 // 2. Measure the time to execute a parallel loop, each thread doing
 //    the same amount of work as in the single thread case. (weak scaling)
 // 3. Repeat parallel loop measurement to get a new time that (assuming
 //    thread pooling) will not have thread creation time in it.
+// 4. Reports task and thread affinity information.
+//      MPI Rank ID
+//      CPU ID, same as hardware thread ID, same as PU# from lstopo output
+//      physical core ID
+//      NUMA node ID, same as socket ID
+//      hostname
 //
 //  Options:
 //  --results Whether to output timing results (off by default)
@@ -20,17 +26,23 @@
 #include <unistd.h>
 #include <getopt.h>
 #include <string.h>
+#include <math.h>
 #include "omp_common.h"
 
 // Get a physical core ID from a CPU ID
 int core_from_cpu(hwloc_topology_t, int);
 
+// rdtscp:  Read Time-Stamp Counter and Processor ID IA assembly instruction
+//
+// It is the easist way to determine which numa region (socket) and which 
+// core (actually hardware thread ID) a process is running on. The value of 
+// the timestamp register is stored into the EDX and EAX registers; the 
+// value of the CPU id info is stored into the ECX register 
 //
 // This is a generic TSC reader if the compiler does not provide an intrinsic for it.
 // (The Intel intrisic is simply __rdtscp.)
 // Read the discussion here as to how this came about.
 // https://software.intel.com/en-us/forums/intel-isa-extensions/topic/280440 (17 Feb 2014)
-// What is called a "core" here is actually a hardware thread. sckt == numa node
 //
 unsigned long generic_rdtscp(int *core, int *sckt)
 {
@@ -38,8 +50,8 @@ unsigned long generic_rdtscp(int *core, int *sckt)
 
   __asm__ volatile("rdtscp" : "=a" (a), "=d" (d), "=c" (c));
 
-  *sckt = (c & 0xFFF000)>>12;
-  *core = c & 0xFFF;
+  *sckt = (c & 0xFFF000)>>12;  // socket info is the higher order bits of the ECX register
+  *core = c & 0xFFF;           // Hardware thread ID is the lower order bits of the ECX
 
   return ( (unsigned long)a ) | ( ((unsigned long)d ) << 32 );;
 }
@@ -190,7 +202,7 @@ void workloop(int workIters) {
    double a = 0.0;
 
    for (i = 0; i < workIters; i++)
-      a += i;
+      a += sin( (double) i);
 } // workloop()
 #pragma _CRI opt  // Cray
 #pragma GCC pop_options // Gnu
