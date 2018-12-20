@@ -2,21 +2,24 @@
 // omp_overhead.c
 //
 // Measures OMP overhead and speedup, also reports thread affinity status.
-// 1. Measure the time to execute a serial loop
-// 2. Measure the time to execute a parallel loop, each thread doing
-//    the same amount of work as in the single thread case. (weak scaling)
-// 3. Repeat parallel loop measurement to get a new time that (assuming
-//    thread pooling) will not have thread creation time in it.
-// 4. Reports task and thread affinity information.
-//      MPI Rank ID
-//      PU ID, same as hardware thread ID, same as PU# from lstopo output
-//      physical core ID
-//      NUMA ID, same as socket ID
-//      hostname
+// 1. Measure the time to execute a serial function
+// 2. Measure the time to execute the same serial function on individual
+//    threads. The same amount of work is performed as in the single 
+//    thread case. (weak scaling)
+// 3. Reports task and thread affinity information.
+//      * MPI Rank ID
+//      * Physical PU ID, same as hardware thread ID, same as PU# from 
+//        lstopo -p output
+//      * Physical core ID
+//      * NUMA ID, same as socket ID
+//      * Hostname
 //
 //  Options:
-//  --results Whether to output timing results (off by default)
-//  --csv Output in simple csv format (off by default)
+//  --results    Whether to output timing results (off by default)
+//  --csv        Output in simple csv format (off by default)
+//  --mpi        MPI ranks will print out their affinity info
+//  --logical    Display core and PU IDs using the logical indexing
+//  --nth <int>  Have the synthetic work function find the nth prime number
 
 #include "hwloc.h"
 #include <mpi.h>
@@ -29,9 +32,14 @@
 #include <math.h>
 #include "omp_common.h"
 
-// Get a physical core ID from a PU ID
+// Given a physical PU id, return the logical PU id
+int lpu_from_pu(hwloc_topology_t, int);
+// Get a physical core ID from a processing unit (PU) ID
 int core_from_pu(hwloc_topology_t, int);
+// Get a logical core index from a logial PU index
+int lcore_from_pu(hwloc_topology_t , int );
 
+// This is how we get the physical PU and node IDs.
 // rdtscp:  Read Time-Stamp Counter and Processor ID IA assembly instruction
 //          Introduced in Core i7 and newer.
 // Read 64-bit time-stamp counter and 32-bit IA32_TSC_AUX value into EDX:EAX and ECX.
@@ -76,7 +84,8 @@ int main(int argc, char** argv) {
    int tid, nThreads;
 
    unsigned long int tscValue;
-   int pu_id, core_id, numa_id;
+   int pu_id, core_id, numa_id;  // Physical index values
+   int lpu_id, lcore_id;         // Logically indexed pu and core id values.
 
    hwloc_topology_t topology;
 
@@ -119,6 +128,7 @@ int main(int argc, char** argv) {
    // Broadcast nth
    MPI_Bcast(&result_flag, 1, MPI_INT, 0, MPI_COMM_WORLD);
    MPI_Bcast(&csv_flag,    1, MPI_INT, 0, MPI_COMM_WORLD);
+   MPI_Bcast(&logical_flag,1, MPI_INT, 0, MPI_COMM_WORLD);
    MPI_Bcast(&mpi_flag,    1, MPI_INT, 0, MPI_COMM_WORLD);
    MPI_Bcast(&nth,         1, MPI_INT, 0, MPI_COMM_WORLD);
 
@@ -133,8 +143,14 @@ int main(int argc, char** argv) {
 
    if (mpi_flag) {
       tscValue = generic_rdtscp(&pu_id, &numa_id); // sets the value of pu_id and numa_id
-      core_id = core_from_pu(topology, pu_id);
-      printf("MPI-only: Rank %d, PU %d, core %d, NUMA id %d (%s).\n", rank, pu_id, core_id, numa_id, hnbuf);
+      if (logical_flag) {
+         lpu_id = lpu_from_pu(topology, pu_id); 
+         lcore_id = lcore_from_pu(topology, pu_id);
+         printf("MPI-only: Rank %d, lPU %d, lcore %d, NUMA id %d (%s).\n", rank, lpu_id, lcore_id, numa_id, hnbuf);
+      } else {
+         core_id = core_from_pu(topology, pu_id);
+         printf("MPI-only: Rank %d, PU %d, core %d, NUMA id %d (%s).\n", rank, pu_id, core_id, numa_id, hnbuf);
+      }
    }
 
    #pragma omp master
@@ -142,7 +158,7 @@ int main(int argc, char** argv) {
       if (csv_flag) printf("Rank, Thread, PU ID, Core ID, NUMA ID, Host\n");
    }
    omp_set_dynamic(0);
-   #pragma omp parallel private(tid, pu_id, core_id, numa_id, nthPrime) shared(topology)
+   #pragma omp parallel private(tid, pu_id, core_id, lpu_id, lcore_id, numa_id, nthPrime) shared(topology)
    {
       tid = omp_get_thread_num();
       nThreads = omp_get_num_threads();
@@ -154,11 +170,24 @@ int main(int argc, char** argv) {
       pTime = (omp_get_wtime() - startTime);
       #pragma omp barrier
       tscValue = generic_rdtscp(&pu_id, &numa_id); // sets the value of pu_id and numa_id
-      core_id = core_from_pu(topology, pu_id);
-      if (csv_flag) {
-         printf("%d, %d, %d, %d, %d, %s.\n", rank, tid, pu_id, core_id, numa_id, hnbuf);
+      if (logical_flag) {
+         lpu_id = lpu_from_pu(topology, pu_id); 
+         lcore_id = lcore_from_pu(topology, pu_id);
       } else {
-         printf("OMP: Rank %d, thread %d of %d on PU %d, core %d, NUMA id %d (%s).\n", rank, tid, nThreads, pu_id, core_id, numa_id, hnbuf);
+         core_id = core_from_pu(topology, pu_id);
+      }
+      if (csv_flag) {
+         if (logical_flag) {
+            printf("%d, %d, %d, %d, %d, %s.\n", rank, tid, lpu_id, lcore_id, numa_id, hnbuf);
+         } else {
+            printf("%d, %d, %d, %d, %d, %s.\n", rank, tid, pu_id, core_id, numa_id, hnbuf);
+         } // logical flag
+      } else { // normal output
+         if (logical_flag) {
+            printf("OMP: Rank %d, thread %d of %d on lPU %d, lcore %d, NUMA id %d (%s).\n", rank, tid, nThreads, lpu_id, lcore_id, numa_id, hnbuf);
+         } else {
+            printf("OMP: Rank %d, thread %d of %d on PU %d, core %d, NUMA id %d (%s).\n", rank, tid, nThreads, pu_id, core_id, numa_id, hnbuf);
+         } // logical flag
       }
    }
 
@@ -210,6 +239,27 @@ long findPrimeNumber(int n)
    return (--a);
 }
 
+// Given a physical PU index, return the logical PU index
+// May have to revisit this, see if it's necessary.
+// On Broadwell, for example, these are always the same
+int lpu_from_pu(hwloc_topology_t topology, int puid)
+{
+  int lpuid = -1;
+  hwloc_obj_t pu_obj;
+
+  // Find the pu obj with physical index puid
+  // Find the first pu object
+  pu_obj = hwloc_get_obj_by_type(topology, HWLOC_OBJ_PU, 0);
+  while( pu_obj != NULL ) {
+    if ( puid == pu_obj->os_index) {
+       lpuid = pu_obj->logical_index;
+    }
+    pu_obj = hwloc_get_next_obj_by_type(topology, HWLOC_OBJ_PU, pu_obj);
+  }
+
+  return lpuid;
+}
+
 // Given a physical PU (CPU) ID, return the physical core that owns it
 // Physical PU indexes are guaranteed unique across a node.
 int core_from_pu(hwloc_topology_t topology, int puid)
@@ -231,4 +281,26 @@ int core_from_pu(hwloc_topology_t topology, int puid)
   if (parent != NULL) coreid = parent->os_index;
 
   return coreid;
+}
+
+// Given a physical PU index, return the logical core index that owns it
+int lcore_from_pu(hwloc_topology_t topology, int puid)
+{
+  int lcoreid = -1;
+  hwloc_obj_t parent = NULL;
+  hwloc_obj_t pu_obj;
+
+  // Find the pu obj with logical index puid
+  // Find the first pu object
+  pu_obj = hwloc_get_obj_by_type(topology, HWLOC_OBJ_PU, 0);
+  while( pu_obj != NULL ) {
+    if ( puid == pu_obj->os_index) {
+       parent = pu_obj->parent;
+    }
+    pu_obj = hwloc_get_next_obj_by_type(topology, HWLOC_OBJ_PU, pu_obj);
+  }
+
+  if (parent != NULL) lcoreid = parent->logical_index;
+
+  return lcoreid;
 }

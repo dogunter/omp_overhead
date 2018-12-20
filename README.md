@@ -4,20 +4,17 @@ OpenMP Affinity Verification and Overhead Measurement
 
 This code measures the overhead associated with launching and managing OpenMP threads on a system.
 It achieves this by
-   1. Measuring the time to execute a serial synthetic work loop;
-   2. Measuring the time to execute a parallel version of the same loop, 
-      each thread performing the same amount of work as in the 
-      single-threaded case. (weak scaling);
-   3. Repeating the parallel loop measurement to get a new time that (assuming
-      thread pooling) will not have thread creation time in it.
+   1. Measuring the time to execute a serial function
+   2. Measuring the time each thread takes to evaluate the same function
+      (same amount of work; weak scaling behavior)
 
 Additionally, the code prints out information for each thread to show affinity information. For each thread this includes,
 
    * MPI Rank ID
    * Thread ID
    * Total number of threads
-   * CPU ID (equivalent to logical hardware thread ID)
-   * Physical Core ID
+   * PU ID - either physical index (default) or logical index
+   * Core ID - either physical index (default) or logical index
    * NUMA Node ID (equivalent to socket ID for man Intel packages)
    * Node hostname
 
@@ -63,11 +60,15 @@ The code is typically run in an interactive session. Once proper OMP and other r
 
 where the following options are recognized,
 
-  `--results`  Whether to output timing results (off by default)
+  `--results`   Whether to output timing results (off by default)
 
-  `--csv`      Output in simple csv format (off by default)
+  `--csv`       Output in simple csv format (off by default)
 
-  `--mpi`      Each MPI rank will also print affinity info (off by default)
+  `--logical`   Print out the logical PU and core indices. (Default is physical)
+
+  `--mpi`       Each MPI rank will also print affinity info (off by default)
+
+  `--nth <int>` Have the workload function calculate the nth prime number. Basically increases time.
 
 # Sample output
 
