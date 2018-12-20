@@ -9,9 +9,9 @@
 //    thread pooling) will not have thread creation time in it.
 // 4. Reports task and thread affinity information.
 //      MPI Rank ID
-//      CPU ID, same as hardware thread ID, same as PU# from lstopo output
+//      PU ID, same as hardware thread ID, same as PU# from lstopo output
 //      physical core ID
-//      NUMA node ID, same as socket ID
+//      NUMA ID, same as socket ID
 //      hostname
 //
 //  Options:
@@ -29,58 +29,62 @@
 #include <math.h>
 #include "omp_common.h"
 
-// Get a physical core ID from a CPU ID
-int core_from_cpu(hwloc_topology_t, int);
+// Get a physical core ID from a PU ID
+int core_from_pu(hwloc_topology_t, int);
 
 // rdtscp:  Read Time-Stamp Counter and Processor ID IA assembly instruction
+//          Introduced in Core i7 and newer.
+// Read 64-bit time-stamp counter and 32-bit IA32_TSC_AUX value into EDX:EAX and ECX.
+// The OS should write the core id into IA32_TSC_AUX. Linux does this, as well as 
+// storing the NUMA region id
+//       if (cpu_has(&cpu_data(cpu), X86_FEATURE_RDTSCP))
+//          write_rdtscp_aux((node << 12) | cpu);
 //
-// It is the easist way to determine which numa region (socket) and which 
-// core (actually hardware thread ID) a process is running on. The value of 
-// the timestamp register is stored into the EDX and EAX registers; the 
-// value of the CPU id info is stored into the ECX register 
+//          /*
+//           * Store cpu number in limit so that it can be loaded quickly
+//           * in user space in vgetcpu. (12 bits for the CPU and 8 bits for the node)
+//           */ 
+//
+// This makes it the easist way to determine which numa region (socket) and which 
+// core (actually hardware thread ID in the case of hyperthreading) a process is running on.
 //
 // This is a generic TSC reader if the compiler does not provide an intrinsic for it.
 // (The Intel intrisic is simply __rdtscp.)
-// Read the discussion here as to how this came about.
-// https://software.intel.com/en-us/forums/intel-isa-extensions/topic/280440 (17 Feb 2014)
 //
-unsigned long generic_rdtscp(int *core, int *sckt)
+unsigned long generic_rdtscp(int *pu_id, int *numa_id)
 {
   unsigned int a, d, c;
 
   __asm__ volatile("rdtscp" : "=a" (a), "=d" (d), "=c" (c));
 
-  *sckt = (c & 0xFFF000)>>12;  // socket info is the higher order bits of the ECX register
-  *core = c & 0xFFF;           // Hardware thread ID is the lower order bits of the ECX
+  *numa_id = (c & 0xFFF000)>>12; // Mask off lower bits and then shift to get numa_id
+  *pu_id = c & 0xFFF;            // Mask off higher bits and then read pu_id from lower 8 bits
 
   return ( (unsigned long)a ) | ( ((unsigned long)d ) << 32 );;
 }
 
-//
-// workloop is a simple pseudo work loop
-// Compile it as unoptimized since its basic purpose is to provide
-// a known delay.
-// Sadly, this only works for Gnu compilers,
-//     void __attribute__((optimize("O0"))) workloop(int);
-//
-void workloop(int);
+// A time-consuming function
+long findPrimeNumber(int);
 
 int main(int argc, char** argv) {
 
-   int i, rank, total_ranks;
+   int i, err, rank, total_ranks;
    int opt = 0;
    int longIndex = 0;
-   int workIters, loopReps;
+   int nth;
+   long nthPrime;
    int tid, nThreads;
 
    unsigned long int tscValue;
-   int cpu_id, core_id, numa_node;
+   int pu_id, core_id, numa_id;
 
    hwloc_topology_t topology;
 
    double startTime;
    double sTime; // Serial loop time
    double pTime; // Parallel loop time
+   // MPI timing variables
+   double mpi_stime, mpi_etime;
 
    char hnbuf[64]; // holds the hostname (node ID)
 
@@ -88,83 +92,74 @@ int main(int argc, char** argv) {
    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
    MPI_Comm_size(MPI_COMM_WORLD, &total_ranks);
 
+   mpi_stime = MPI_Wtime();
+
    // Create the topology
    hwloc_topology_init(&topology);
    hwloc_topology_load(topology);
 
    // Parse options
-   //  --work-iters <integer>> - The number of iterations for workloop()
-   //  --loop-reps <integer> - The number of iterations for the outer loop
+   //  --nth <integer>> - Find the nth prime number
 
    if (rank == 0 ) {
       int long_index =0;
-      workIters = WORKITERS;
-      loopReps = LOOPREPS;
-      while ((opt = getopt_long(argc, argv,"l:w:", longOpts, &long_index )) != -1) {
+      nth = NTH;
+      while ((opt = getopt_long(argc, argv,"n:", longOpts, &long_index )) != -1) {
          switch (opt) {
             case 0:
             // If a flag was set, do nothing else
             if (longOpts[long_index].flag != 0)
                break;
-            case 'l' : loopReps = atoi(optarg);
-               break;
-            case 'w' : workIters = atoi(optarg);
+            case 'n' : nth = atoi(optarg);
                break;
          }
       }
    } // end-if
 
-   // Broadcast workIters and loopReps
+   // Broadcast nth
    MPI_Bcast(&result_flag, 1, MPI_INT, 0, MPI_COMM_WORLD);
    MPI_Bcast(&csv_flag,    1, MPI_INT, 0, MPI_COMM_WORLD);
-   MPI_Bcast(&workIters,   1, MPI_INT, 0, MPI_COMM_WORLD);
-   MPI_Bcast(&loopReps,    1, MPI_INT, 0, MPI_COMM_WORLD);
+   MPI_Bcast(&mpi_flag,    1, MPI_INT, 0, MPI_COMM_WORLD);
+   MPI_Bcast(&nth,         1, MPI_INT, 0, MPI_COMM_WORLD);
 
    memset(hnbuf, 0, sizeof(hnbuf));
-  (void)gethostname(hnbuf, sizeof(hnbuf));
+   err = gethostname(hnbuf, sizeof(hnbuf));
+
+
+   // Serial loop (every MPI rank does this)
+   startTime = omp_get_wtime();
+   nthPrime = findPrimeNumber(nth);
+   sTime = (omp_get_wtime() - startTime);
+
+   if (mpi_flag) {
+      tscValue = generic_rdtscp(&pu_id, &numa_id); // sets the value of pu_id and numa_id
+      core_id = core_from_pu(topology, pu_id);
+      printf("MPI-only: Rank %d, PU %d, core %d, NUMA id %d (%s).\n", rank, pu_id, core_id, numa_id, hnbuf);
+   }
 
    #pragma omp master
    {
-      if (csv_flag) printf("Rank, Thread, CPU ID, Core ID, NUMA Node, Host\n");
+      if (csv_flag) printf("Rank, Thread, PU ID, Core ID, NUMA ID, Host\n");
    }
    omp_set_dynamic(0);
-   #pragma omp parallel private(tid, cpu_id, core_id, numa_node) shared(topology)
+   #pragma omp parallel private(tid, pu_id, core_id, numa_id, nthPrime) shared(topology)
    {
       tid = omp_get_thread_num();
       nThreads = omp_get_num_threads();
-      tscValue = generic_rdtscp(&cpu_id, &numa_node); // sets the value of cpu_id
-                                                      // and numa_node
-      core_id = core_from_cpu(topology, cpu_id);
-      #pragma omp barrier
-      if (csv_flag) {
-         printf("%d, %d, %d, %d, %d, %s.\n", rank, tid, cpu_id, core_id, numa_node, hnbuf);
-      } else {
-         printf("Rank %d, thread %d of %d on CPU %d, core %d, NUMA node %d (%s).\n", rank, tid, nThreads, cpu_id, core_id, numa_node, hnbuf);
-      }
-   }
-
-   // Serial loop
-   startTime = omp_get_wtime();
-   for(int j = 0; j < loopReps; j++) {
-      workloop(workIters);
-   }
-   sTime = (omp_get_wtime() - startTime);
-
-   // Parallel loop
-   // In theory, each thread will execute workloop() a total of loopReps iterations,
-   // exactly as for the case of the single-thread execution above. We will
-   // get a longer execution time because of the overhead associated with
-   // OMP FOR.
-   #pragma omp parallel
-   {
       startTime = omp_get_wtime();
-      for(int j = 0; j < loopReps; j++) {
-   #pragma omp for
-         for(int i = 0; i < nThreads; i++) {
-            workloop(workIters);
-         }
+      #pragma omp for
+      for(int i = 0; i < nThreads; i++) {
+         nthPrime = findPrimeNumber( nth ); // All threads do the same amount of work
       }
       pTime = (omp_get_wtime() - startTime);
+      #pragma omp barrier
+      tscValue = generic_rdtscp(&pu_id, &numa_id); // sets the value of pu_id and numa_id
+      core_id = core_from_pu(topology, pu_id);
+      if (csv_flag) {
+         printf("%d, %d, %d, %d, %d, %s.\n", rank, tid, pu_id, core_id, numa_id, hnbuf);
+      } else {
+         printf("OMP: Rank %d, thread %d of %d on PU %d, core %d, NUMA id %d (%s).\n", rank, tid, nThreads, pu_id, core_id, numa_id, hnbuf);
+      }
    }
 
    // output results
@@ -181,37 +176,43 @@ int main(int argc, char** argv) {
       MPI_Barrier(MPI_COMM_WORLD);
    }
  
+   mpi_etime = MPI_Wtime();
+   if (rank == 0) printf("Elapsed time: %f\n", mpi_etime - mpi_stime);
+
    MPI_Finalize();
    return 0;
 }
 
-// A low-memory, low cache-use loop to simulate work
-// Sadly, this only works for Gnu compilers,
-//     void __attribute__((optimize("O0"))) workloop(int);
-//
-// For Intel compilers,
-#pragma optimize ("", off)
-// For GCC compilers
-#pragma GCC push_options
-#pragma GCC optimize ("O0")
-// for Cray compilers
-#pragma _CRI noopt
-inline
-void workloop(int workIters) {
-   int i;
-   double a = 0.0;
-
-   for (i = 0; i < workIters; i++)
-      a += sin( (double) i);
-} // workloop()
-#pragma _CRI opt  // Cray
-#pragma GCC pop_options // Gnu
-#pragma optimize ("", on)  // Intel
-
+// Find the nth prime number
+long findPrimeNumber(int n)
+{
+   int count=0;
+   long a = 2;
+   while ( count < n )
+   {
+      long b = 2;
+      int prime = 1;  // to check if found a prime
+      while ( b * b <= a)
+      {
+         if ( a % b == 0 )
+         {
+            prime = 0;
+            break;
+         }
+         b++;
+      }
+      if( prime > 0 )
+      {
+         count++;
+      }
+      a++;
+   }
+   return (--a);
+}
 
 // Given a physical PU (CPU) ID, return the physical core that owns it
 // Physical PU indexes are guaranteed unique across a node.
-int core_from_cpu(hwloc_topology_t topology, int puid)
+int core_from_pu(hwloc_topology_t topology, int puid)
 {
   int coreid = -1;
   hwloc_obj_t parent = NULL;

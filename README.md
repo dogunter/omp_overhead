@@ -67,6 +67,8 @@ where the following options are recognized,
 
   `--csv`      Output in simple csv format (off by default)
 
+  `--mpi`      Each MPI rank will also print affinity info (off by default)
+
 # Sample output
 
 Note: Sample output was produced on a test system utilizing Intel Broadwell processors with 2 sockets per package, 18 cores per socket and 2 hardware threads (hyperthreads) per core. These processors have hardware threads numbered 0-17 on the first 18 cores of socket 0, threads 18-35 on socket 1; then threads 36-53 back on socket 0, and threads 54-71 on socket 1.
