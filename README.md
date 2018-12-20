@@ -71,6 +71,8 @@ where the following options are recognized,
 
 # Sample output
 
+[This info is out of date with the current version of the code and needs to be updated. 12/20/2018]
+
 Note: Sample output was produced on a test system utilizing Intel Broadwell processors with 2 sockets per package, 18 cores per socket and 2 hardware threads (hyperthreads) per core. These processors have hardware threads numbered 0-17 on the first 18 cores of socket 0, threads 18-35 on socket 1; then threads 36-53 back on socket 0, and threads 54-71 on socket 1.
 
 Example 1: Run 1 MPI rank on 1 socket, 8 OpenMP threads, 1 thread per core,
