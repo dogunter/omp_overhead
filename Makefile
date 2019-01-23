@@ -28,10 +28,15 @@ gnu:
 	$(MAKE) -f make.$@
 	-mv omp_overhead omp_overhead.GNU
 
+arm:
+	$(MAKE) clean
+	$(MAKE) -f make.$@
+	-mv omp_overhead omp_overhead.ARM
+
 clean:
 	-rm -f *.o *.lst
 
 cleanall: clean
 	$(MAKE) clean
-	-rm -f *.INTEL *.CRAY *.GNU *.PGI
+	-rm -f *.INTEL *.CRAY *.GNU *.PGI *.ARM
 

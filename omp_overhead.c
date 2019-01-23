@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <sys/syscall.h>
 #include <getopt.h>
 #include <string.h>
 #include <math.h>
@@ -59,6 +60,7 @@ int lcore_from_pu(hwloc_topology_t , int );
 // This is a generic TSC reader if the compiler does not provide an intrinsic for it.
 // (The Intel intrisic is simply __rdtscp.)
 //
+#ifdef __INTEL64_TSC__
 unsigned long generic_rdtscp(int *pu_id, int *numa_id)
 {
   unsigned int a, d, c;
@@ -70,6 +72,7 @@ unsigned long generic_rdtscp(int *pu_id, int *numa_id)
 
   return ( (unsigned long)a ) | ( ((unsigned long)d ) << 32 );;
 }
+#endif // __INTEL64_TSC__
 
 // A time-consuming function
 long findPrimeNumber(int);
@@ -83,7 +86,9 @@ int main(int argc, char** argv) {
    long nthPrime;
    int tid, nThreads;
 
+#ifdef __INTEL64_TSC__
    unsigned long int tscValue;
+#endif
    int pu_id, core_id, numa_id;  // Physical index values
    int lpu_id, lcore_id;         // Logically indexed pu and core id values.
 
@@ -142,7 +147,12 @@ int main(int argc, char** argv) {
    sTime = (omp_get_wtime() - startTime);
 
    if (mpi_flag) {
+#ifdef __INTEL64_TSC__
       tscValue = generic_rdtscp(&pu_id, &numa_id); // sets the value of pu_id and numa_id
+#else
+      syscall(SYS_getcpu, &pu_id, &numa_id, NULL);
+#endif
+
       if (logical_flag) {
          lpu_id = lpu_from_pu(topology, pu_id); 
          lcore_id = lcore_from_pu(topology, pu_id);
@@ -169,7 +179,11 @@ int main(int argc, char** argv) {
       }
       pTime = (omp_get_wtime() - startTime);
       #pragma omp barrier
+#ifdef __INTEL64_TSC__
       tscValue = generic_rdtscp(&pu_id, &numa_id); // sets the value of pu_id and numa_id
+#else
+      syscall(SYS_getcpu, &pu_id, &numa_id, NULL);
+#endif
       if (logical_flag) {
          lpu_id = lpu_from_pu(topology, pu_id); 
          lcore_id = lcore_from_pu(topology, pu_id);
