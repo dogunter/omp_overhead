@@ -1,4 +1,4 @@
-.PHONY: clean cleanall intel cray gnu pgi
+.PHONY: clean cleanall intel cray gnu pgi arm
 
 # What system are we on?
 #ifeq ($(PELANL_PRGENV),true)
@@ -6,7 +6,7 @@
 #else
 #HWLOCROOT=/users/dog/software/$(SYSNAME)
 #endif
-export HWLOCROOT
+#export HWLOCROOT
 
 intel:
 	$(MAKE) clean
