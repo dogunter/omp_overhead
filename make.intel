@@ -12,10 +12,10 @@ else
   CC=mpicc
   CXX=mpiCC
   FC=mpif90
-#  CFLAGS = -std=c99 -qopenmp -no-vec -g -O0
-  CFLAGS = -qopenmp -no-vec -g -O0
-#  CXXFLAGS = -std=c99 -qopenmp -no-vec -g -O0
-  CXXFLAGS = -qopenmp -no-vec -g -O0
+  CFLAGS = -D__INTEL64_TSC__=1 -std=c99 -qopenmp -no-vec -g -O0
+# CFLAGS = -qopenmp -no-vec -g -O0
+  CXXFLAGS = -std=c99 -qopenmp -no-vec -g -O0
+# CXXFLAGS = -qopenmp -no-vec -g -O0
   FCFLAGS = -qopenmp -no-vec -g -O0
 endif
 
