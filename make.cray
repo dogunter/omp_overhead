@@ -1,13 +1,16 @@
 .PHONY: all
 
 #Are we on cray?
-ifdef ($(CRAYPE_VERSION))
+#$(info $$CRAYPE_VERSION is [${CRAYPE_VERSION}])
+#Cray ENV 2.7.7 (Chicoma) uses clang
+ifdef CRAYPE_VERSION
   CC=cc
   CXX=CC
   FC=ftn
-  CFLAGS= -dynamic -O0 -h omp -h vector0
-  CXXFLAGS= -dynamic -O0 -h omp -h vector0
-  FCFLAGS= -dynamic -O0 -h omp -h vector0
+#  CFLAGS= -dynamic -O0 -h omp -h vector0
+  CFLAGS= -dynamic -O0 -fopenmp -fno-vectorize
+  CXXFLAGS= -dynamic -O0 -fopenmp -fno-vectorize
+  FCFLAGS= -dynamic -O0 -fopenmp -fno-vectorize
 else
   CC=mpicc
   CXX=mpiCC
